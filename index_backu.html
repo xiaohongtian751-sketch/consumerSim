@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>consumerSim - 招聘专属AI虚拟用户</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#10B981', // 主色绿色
+                        secondary: '#F0FDF4', // 淡绿色底色
+                        neutral: '#FFFFFF', // 白色底色
+                        border: '#E5E7EB', // 边框色
+                    },
+                    fontFamily: {
+                        inter: ['Inter', 'system-ui', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .btn-primary {
+                @apply bg-primary text-white px-6 py-3 rounded-lg font-medium hover:bg-primary/90 transition-colors shadow-md;
+            }
+            .btn-outline {
+                @apply border-2 border-primary text-primary px-6 py-3 rounded-lg font-medium hover:bg-secondary transition-colors;
+            }
+            .card-shadow {
+                @apply shadow-sm hover:shadow-md transition-shadow;
+            }
+            .section-padding {
+                @apply py-20 px-4 sm:px-6 lg:px-8;
+            }
+        }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="font-inter">
+    <!-- 导航栏（所有页面共用） -->
+    <nav class="bg-white shadow-sm sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16 items-center">
+                <a href="#home" class="text-xl font-semibold text-gray-800">consumerSim</a>
+                <div class="space-x-4">
+                    <a href="#home" class="text-gray-600 hover:text-primary transition-colors">首页</a>
+                    <a href="#workbench" class="text-gray-600 hover:text-primary transition-colors">工作台</a>
+                    <a href="#scenario" class="text-gray-600 hover:text-primary transition-colors">场景研究</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 1. 首页 -->
+    <section id="home" class="bg-secondary section-padding">
+        <div class="max-w-7xl mx-auto">
+            <!-- 第一部分：标题+按钮 -->
+            <div class="text-center mb-20">
+                <h1 class="text-[clamp(2.5rem,6vw,4rem)] font-bold text-gray-900 mb-4">招聘专属AI虚拟用户</h1>
+                <p class="text-2xl text-gray-700 mb-6">consumerSim</p>
+                <p class="text-lg text-gray-600 max-w-2xl mx-auto mb-10">无需招募真实用户，立即获取深入的消费者洞察，加速产品和业务决策</p>
+                <div class="flex flex-col sm:flex-row justify-center gap-4">
+                    <a href="#workbench" class="btn-primary">进入工作台</a>
+                    <a href="#scenario" class="btn-outline">场景研究</a>
+                </div>
+            </div>
+
+            <!-- 第二部分：为什么选择我们 -->
+            <div class="bg-neutral rounded-2xl p-8 shadow-md">
+                <h2 class="text-2xl font-bold text-gray-900 mb-8 text-center">为什么选择consumerSim</h2>
+                <p class="text-gray-600 text-center mb-12 max-w-3xl mx-auto">与传统用户研究相比，我们的AI驱动解决方案提供了显著的竞争优势</p>
+                
+                <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
+                    <!-- 模块1：降低90%研究成本 -->
+                    <div class="flex flex-col items-center text-center card-shadow p-6 rounded-xl bg-white">
+                        <div class="w-16 h-16 bg-secondary rounded-full flex items-center justify-center mb-4">
+                            <i class="fa fa-money text-primary text-2xl"></i>
+                        </div>
+                        <h3 class="text-xl font-semibold mb-2">降低90%研究成本</h3>
+                        <p class="text-gray-600">无需支付用户招募、场地租赁等费用，大幅降低研究成本</p>
+                    </div>
+
+                    <!-- 模块2：研究周期缩短95% -->
+                    <div class="flex flex-col items-center text-center card-shadow p-6 rounded-xl bg-white">
+                        <div class="w-16 h-16 bg-secondary rounded-full flex items-center justify-center mb-4">
+                            <i class="fa fa-clock-o text-primary text-2xl"></i>
+                        </div>
+                        <h3 class="text-xl font-semibold mb-2">研究周期缩短95%</h3>
+                        <p class="text-gray-600">即时生成虚拟用户洞察，无需等待招募和访谈周期</p>
+                    </div>
+
+                    <!-- 模块3：可扩展的样本规模 -->
+                    <div class="flex flex-col items-center text-center card-shadow p-6 rounded-xl bg-white">
+                        <div class="w-16 h-16 bg-secondary rounded-full flex items-center justify-center mb-4">
+                            <i class="fa fa-users text-primary text-2xl"></i>
+                        </div>
+                        <h3 class="text-xl font-semibold mb-2">可扩展的样本规模</h3>
+                        <p class="text-gray-600">按需生成任意数量的虚拟用户，满足不同样本量需求</p>
+                    </div>
+
+                    <!-- 模块4：无限迭代优化 -->
+                    <div class="flex flex-col items-center text-center card-shadow p-6 rounded-xl bg-white">
+                        <div class="w-16 h-16 bg-secondary rounded-full flex items-center justify-center mb-4">
+                            <i class="fa fa-refresh text-primary text-2xl"></i>
+                        </div>
+                        <h3 class="text-xl font-semibold mb-2">无限迭代优化</h3>
+                        <p class="text-gray-600">根据反馈快速调整虚拟用户模型，持续优化研究结果</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 2. 工作台页面 -->
+    <section id="workbench" class="bg-white section-padding">
+        <div class="max-w-7xl mx-auto">
+            <h2 class="text-3xl font-bold text-gray-900 mb-10 text-center">用户角色创建</h2>
+            
+            <div class="space-y-8">
+                <!-- 模块1：用户创建使用指南（可展开/折叠） -->
+                <div class="bg-white border border-border rounded-xl shadow-sm">
+                    <div class="flex justify-between items-center p-6 cursor-pointer" id="guideToggle">
+                        <h3 class="text-xl font-semibold text-gray-800">用户创建使用指南</h3>
+                        <i class="fa fa-chevron-down text-gray-500 transition-transform" id="guideIcon"></i>
+                    </div>
+                    <div class="p-6 border-t border-border hidden" id="guideContent">
+                        <ul class="list-disc list-inside text-gray-600 space-y-2">
+                            <li>填写业务描述和业务目标，清晰描述您的研究方向</li>
+                            <li>上传访谈记录（支持PDF/MD/TXT格式），辅助AI生成更精准的用户角色</li>
+                            <li>点击「生成用户角色」按钮，系统将自动生成蓝领相关虚拟用户</li>
+                            <li>生成后可编辑用户信息，也可与单个虚拟用户进行对话交互</li>
+                            <li>每次上传新文档，系统会累计生成更多虚拟用户角色</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- 模块2：业务信息填写 -->
+                <div class="bg-white border border-border rounded-xl shadow-sm p-6">
+                    <div class="space-y-6">
+                        <!-- 业务描述 -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">业务描述</label>
+                            <textarea class="w-full border border-border rounded-lg p-3 min-h-[120px] focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none" placeholder="请输入您的业务描述，例如：针对蓝领招聘场景，研究建筑工人的求职偏好和薪资期望..."></textarea>
+                        </div>
+
+                        <!-- 业务目标 -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">业务目标</label>
+                            <textarea class="w-full border border-border rounded-lg p-3 min-h-[120px] focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none" placeholder="请输入您的业务目标，例如：了解蓝领工人对招聘平台的功能需求，优化产品设计..."></textarea>
+                        </div>
+
+                        <!-- 上传访谈记录 -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">上传访谈记录</label>
+                            <div class="border-2 border-dashed border-border rounded-lg p-6 text-center hover:border-primary transition-colors">
+                                <input type="file" id="fileUpload" accept=".pdf,.md,.txt" class="hidden">
+                                <label for="fileUpload" class="cursor-pointer">
+                                    <i class="fa fa-upload text-primary text-3xl mb-2"></i>
+                                    <p class="text-gray-600 mb-1">点击上传或拖拽文件至此处</p>
+                                    <p class="text-gray-500 text-sm">支持 PDF、MD、TXT 格式文件</p>
+                                </label>
+                                <div id="fileList" class="mt-4 hidden">
+                                    <div class="flex justify-between items-center p-2 bg-secondary rounded-lg mb-2">
+                                        <span class="text-gray-700" id="fileName">访谈记录1.txt</span>
+                                        <span class="text-primary"><i class="fa fa-check"></i> 上传成功</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 生成用户角色按钮 -->
+                        <button id="generateBtn" class="btn-primary w-full">生成用户角色</button>
+                    </div>
+                </div>
+
+                <!-- 模块3：生成的用户列表 -->
+                <div class="bg-white border border-border rounded-xl shadow-sm p-6">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-6">生成的虚拟用户（蓝领画像）</h3>
+                    <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-6" id="userList">
+                        <!-- 默认生成3个蓝领用户 -->
+                        <div class="border border-border rounded-lg p-4 card-shadow">
+                            <div class="flex justify-between items-start mb-4">
+                                <div>
+                                    <h4 class="text-lg font-semibold">王师傅</h4>
+                                    <p class="text-gray-500">男性 | 35岁 | 建筑工人</p>
+                                </div>
+                                <button class="editUserBtn text-primary hover:text-primary/80" data-user="王师傅">
+                                    <i class="fa fa-pencil"></i> 编辑
+                                </button>
+                            </div>
+                            <p class="text-gray-600 mb-4">
+                                从业10年，主要做水电安装，期望月薪8000-10000元，关注工作稳定性和社保缴纳。
+                            </p>
+                            <button class="chatUserBtn btn-outline w-full" data-user="王师傅">
+                                <i class="fa fa-comments"></i> 与TA对话
+                            </button>
+                        </div>
+
+                        <div class="border border-border rounded-lg p-4 card-shadow">
+                            <div class="flex justify-between items-start mb-4">
+                                <div>
+                                    <h4 class="text-lg font-semibold">李大姐</h4>
+                                    <p class="text-gray-500">女性 | 42岁 | 家政服务</p>
+                                </div>
+                                <button class="editUserBtn text-primary hover:text-primary/80" data-user="李大姐">
+                                    <i class="fa fa-pencil"></i> 编辑
+                                </button>
+                            </div>
+                            <p class="text-gray-600 mb-4">
+                                从事家政服务8年，擅长保洁和育儿，期望日薪200元以上，关注工作时长和休息时间。
+                            </p>
+                            <button class="chatUserBtn btn-outline w-full" data-user="李大姐">
+                                <i class="fa fa-comments"></i> 与TA对话
+                            </button>
+                        </div>
+
+                        <div class="border border-border rounded-lg p-4 card-shadow">
+                            <div class="flex justify-between items-start mb-4">
+                                <div>
+                                    <h4 class="text-lg font-semibold">小张</h4>
+                                    <p class="text-gray-500">男性 | 28岁 | 快递员</p>
+                                </div>
+                                <button class="editUserBtn text-primary hover:text-primary/80" data-user="小张">
+                                    <i class="fa fa-pencil"></i> 编辑
+                                </button>
+                            </div>
+                            <p class="text-gray-600 mb-4">
+                                快递行业5年，熟悉同城配送，期望月薪6000-8000元，关注配送工具和补贴政策。
+                            </p>
+                            <button class="chatUserBtn btn-outline w-full" data-user="小张">
+                                <i class="fa fa-comments"></i> 与TA对话
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 3. 场景研究页面 -->
+    <section id="scenario" class="bg-gray-50 section-padding">
+        <div class="max-w-7xl mx-auto">
+            <h2 class="text-3xl font-bold text-gray-900 mb-10 text-center">场景研究</h2>
+            
+            <div class="bg-white border border-border rounded-xl shadow-sm p-8">
+                <!-- 模块1：基本信息 -->
+                <div class="mb-8">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-6">基本信息</h3>
+                    <div class="grid md:grid-cols-2 gap-6">
+                        <!-- 场景名称 -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">场景名称</label>
+                            <input type="text" class="w-full border border-border rounded-lg p-3 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none" placeholder="请输入场景名称，例如：蓝领招聘平台用户体验研究">
+                        </div>
+
+                        <!-- 场景类型 -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">场景类型</label>
+                            <select class="w-full border border-border rounded-lg p-3 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none bg-white">
+                                <option value="">请选择场景类型</option>
+                                <option value="recruitment">蓝领招聘</option>
+                                <option value="salary">薪资调研</option>
+                                <option value="training">技能培训</option>
+                                <option value="welfare">福利保障</option>
+                                <option value="other">其他场景</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 模块2：场景描述与目标 -->
+                <div class="mb-8">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-6">场景描述与目标</h3>
+                    <div class="space-y-6">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">场景描述</label>
+                            <textarea class="w-full border border-border rounded-lg p-3 min-h-[150px] focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none" placeholder="请详细描述研究场景，包括目标用户、使用场景、核心痛点等..."></textarea>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">研究目标</label>
+                            <textarea class="w-full border border-border rounded-lg p-3 min-h-[150px] focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none" placeholder="请明确场景研究的目标，例如：通过虚拟用户调研，优化蓝领招聘流程，提升用户转化率..."></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 模块3：研究执行 -->
+                <div>
+                    <h3 class="text-xl font-semibold text-gray-800 mb-6">研究执行</h3>
+                    <button class="btn-primary">开始场景研究</button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 聊天弹窗（弹层） -->
+    <div id="chatModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+            <!-- 弹窗头部 -->
+            <div class="p-6 border-b border-border flex justify-between items-center">
+                <h3 class="text-xl font-semibold text-gray-800" id="chatTitle">与王师傅对话</h3>
+                <button id="closeChatBtn" class="text-gray-500 hover:text-gray-700">
+                    <i class="fa fa-times text-xl"></i>
+                </button>
+            </div>
+
+            <!-- 聊天内容区域 -->
+            <div id="chatMessages" class="flex-1 p-6 overflow-y-auto space-y-4">
+                <!-- 示例对话 -->
+                <div class="flex flex-col">
+                    <span class="text-sm text-gray-500 mb-1">系统</span>
+                    <div class="bg-gray-100 rounded-lg p-3 max-w-[80%]">
+                        您好，我是王师傅的虚拟形象，您可以向我提问关于蓝领求职的相关问题。
+                    </div>
+                </div>
+            </div>
+
+            <!-- 快捷提问 -->
+            <div class="p-4 border-t border-border">
+                <div class="flex flex-wrap gap-2 mb-4">
+                    <button class="quickBtn px-3 py-1 bg-secondary text-primary rounded-full text-sm hover:bg-primary/10">
+                        你找工作最关注什么？
+                    </button>
+                    <button class="quickBtn px-3 py-1 bg-secondary text-primary rounded-full text-sm hover:bg-primary/10">
+                        期望的薪资是多少？
+                    </button>
+                    <button class="quickBtn px-3 py-1 bg-secondary text-primary rounded-full text-sm hover:bg-primary/10">
+                        对招聘平台有什么建议？
+                    </button>
+                </div>
+
+                <!-- 输入区域 -->
+                <div class="flex gap-2">
+                    <label for="chatFileUpload" class="flex items-center justify-center w-10 h-10 border border-border rounded-lg text-gray-500 hover:bg-gray-50 cursor-pointer">
+                        <i class="fa fa-image"></i>
+                    </label>
+                    <input type="file" id="chatFileUpload" accept="image/*" class="hidden">
+                    <input type="text" id="chatInput" class="flex-1 border border-border rounded-lg p-3 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none" placeholder="请输入问题...">
+                    <button id="sendChatBtn" class="bg-primary text-white px-4 rounded-lg hover:bg-primary/90 transition-colors">
+                        发送
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 编辑用户弹窗 -->
+    <div id="editModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-xl font-semibold text-gray-800">编辑用户信息</h3>
+                <button id="closeEditBtn" class="text-gray-500 hover:text-gray-700">
+                    <i class="fa fa-times text-xl"></i>
+                </button>
+            </div>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">姓名</label>
+                    <input type="text" id="editName" class="w-full border border-border rounded-lg p-2 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">性别</label>
+                    <select id="editGender" class="w-full border border-border rounded-lg p-2 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none bg-white">
+                        <option value="男">男</option>
+                        <option value="女">女</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">年龄</label>
+                    <input type="number" id="editAge" class="w-full border border-border rounded-lg p-2 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">职业</label>
+                    <input type="text" id="editJob" class="w-full border border-border rounded-lg p-2 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">用户描述</label>
+                    <textarea id="editDesc" class="w-full border border-border rounded-lg p-2 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none min-h-[100px]"></textarea>
+                </div>
+            </div>
+            <div class="mt-6 flex justify-end gap-3">
+                <button id="cancelEditBtn" class="px-4 py-2 border border-border rounded-lg text-gray-700 hover:bg-gray-50">
+                    取消
+                </button>
+                <button id="saveEditBtn" class="btn-primary">
+                    保存
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 核心交互逻辑 -->
+    <script>
+        // 1. 指南展开/折叠
+        const guideToggle = document.getElementById('guideToggle');
+        const guideContent = document.getElementById('guideContent');
+        const guideIcon = document.getElementById('guideIcon');
+        
+        guideToggle.addEventListener('click', () => {
+            guideContent.classList.toggle('hidden');
+            guideIcon.classList.toggle('rotate-180');
+        });
+
+        // 2. 文件上传反馈
+        const fileUpload = document.getElementById('fileUpload');
+        const fileList = document.getElementById('fileList');
+        
+        fileUpload.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                fileList.classList.remove('hidden');
+                document.getElementById('fileName').textContent = e.target.files[0].name;
+                
+                // 模拟上传成功反馈
+                setTimeout(() => {
+                    alert('文件上传成功！');
+                }, 500);
+            }
+        });
+
+        // 3. 生成用户角色按钮
+        const generateBtn = document.getElementById('generateBtn');
+        const userList = document.getElementById('userList');
+        
+        generateBtn.addEventListener('click', () => {
+            // 模拟生成新用户
+            const newUser = `
+                <div class="border border-border rounded-lg p-4 card-shadow">
+                    <div class="flex justify-between items-start mb-4">
+                        <div>
+                            <h4 class="text-lg font-semibold">刘师傅</h4>
+                            <p class="text-gray-500">男性 | 40岁 | 装修工人</p>
+                        </div>
+                        <button class="editUserBtn text-primary hover:text-primary/80" data-user="刘师傅">
+                            <i class="fa fa-pencil"></i> 编辑
+                        </button>
+                    </div>
+                    <p class="text-gray-600 mb-4">
+                        装修行业15年，擅长木工和油漆，期望月薪9000-12000元，关注工作安全和工程款结算。
+                    </p>
+                    <button class="chatUserBtn btn-outline w-full" data-user="刘师傅">
+                        <i class="fa fa-comments"></i> 与TA对话
+                    </button>
+                </div>
+            `;
+            userList.insertAdjacentHTML('beforeend', newUser);
+            
+            // 重新绑定事件
+            bindChatEvents();
+            bindEditEvents();
+            
+            alert('用户角色生成成功！已新增1个蓝领虚拟用户');
+        });
+
+        // 4. 聊天弹窗交互 - 通义千问API配置
+        const API_CONFIG = {
+    url: "http://localhost:5000/api/chat", // 现在调用本地代理
+    model: "qwen-turbo"
+};
+
+        const chatModal = document.getElementById('chatModal');
+        const closeChatBtn = document.getElementById('closeChatBtn');
+        const sendChatBtn = document.getElementById('sendChatBtn');
+        const chatInput = document.getElementById('chatInput');
+        const chatMessages = document.getElementById('chatMessages');
+        const chatTitle = document.getElementById('chatTitle');
+        const quickBtns = document.querySelectorAll('.quickBtn');
+        const chatFileUpload = document.getElementById('chatFileUpload');
+
+        // 绑定聊天按钮事件
+        function bindChatEvents() {
+            document.querySelectorAll('.chatUserBtn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const userName = e.currentTarget.dataset.user;
+                    chatTitle.textContent = `与${userName}对话`;
+                    chatModal.classList.remove('hidden');
+                    chatInput.focus();
+                });
+            });
+        }
+
+        // 关闭聊天弹窗
+        closeChatBtn.addEventListener('click', () => {
+            chatModal.classList.add('hidden');
+        });
+
+        // 发送聊天消息到通义千问API
+        async function sendChatMessage(message) {
+            if (!message.trim()) return;
+            
+            // 1. 显示用户消息
+            const userMsg = `
+                <div class="flex flex-col items-end">
+                    <span class="text-sm text-gray-500 mb-1">我</span>
+                    <div class="bg-primary text-white rounded-lg p-3 max-w-[80%]">
+                        ${message}
+                    </div>
+                </div>
+            `;
+            chatMessages.insertAdjacentHTML('beforeend', userMsg);
+            chatInput.value = '';
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            // 2. 显示加载状态
+            const thinkingMsg = `
+                <div class="flex flex-col">
+                    <span class="text-sm text-gray-500 mb-1">${chatTitle.textContent.replace('与', '').replace('对话', '')}</span>
+                    <div class="bg-gray-100 rounded-lg p-3 max-w-[80%]">
+                        <i class="fa fa-circle-o-notch fa-spin"></i> 正在思考...
+                    </div>
+                </div>
+            `;
+            chatMessages.insertAdjacentHTML('beforeend', thinkingMsg);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            try {
+                // 3. 调用通义千问API
+                const response = await fetch(API_CONFIG.url, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${API_CONFIG.key}`
+                    },
+                    body: JSON.stringify({
+                        model: API_CONFIG.model,
+                        input: {
+                            messages: [
+                                {
+                                    role: "system",
+                                    content: `你是一个蓝领虚拟用户，角色是：${chatTitle.textContent.replace('与', '').replace('对话', '')}。
+                                    请用口语化、接地气的蓝领口吻回答问题，不要太书面，要符合你的职业身份（比如家政/建筑/快递等）。`
+                                },
+                                {
+                                    role: "user",
+                                    content: message
+                                }
+                            ]
+                        },
+                        parameters: {
+                            temperature: 0.7,
+                            max_tokens: 500,
+                            result_format: "text"
+                        }
+                    })
+                });
+
+                const data = await response.json();
+                const aiReply = data.output?.text || "抱歉，我现在有点忙，稍后再回复你~";
+
+                // 4. 显示AI回答
+                const thinkingEl = chatMessages.querySelector('.fa-circle-o-notch').closest('div');
+                thinkingEl.innerHTML = `
+                    <span class="text-sm text-gray-500 mb-1">${chatTitle.textContent.replace('与', '').replace('对话', '')}</span>
+                    <div class="bg-gray-100 rounded-lg p-3 max-w-[80%]">
+                        ${aiReply}
+                    </div>
+                `;
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            } catch (error) {
+                // 错误处理
+                console.error("API调用失败：", error);
+                const thinkingEl = chatMessages.querySelector('.fa-circle-o-notch').closest('div');
+                thinkingEl.innerHTML = `
+                    <span class="text-sm text-gray-500 mb-1">${chatTitle.textContent.replace('与', '').replace('对话', '')}</span>
+                    <div class="bg-gray-100 rounded-lg p-3 max-w-[80%] text-red-500">
+                        抱歉，网络有点问题，暂时无法回复你。
+                    </div>
+                `;
+            }
+        }
+
+        // 发送按钮点击事件
+        sendChatBtn.addEventListener('click', () => {
+            sendChatMessage(chatInput.value);
+        });
+
+        // 回车发送
+        chatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendChatMessage(chatInput.value);
+            }
+        });
+
+        // 快捷提问按钮
+        quickBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                sendChatMessage(btn.textContent);
+            });
+        });
+
+        // 图片上传
+        chatFileUpload.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                const fileName = e.target.files[0].name;
+                const fileMsg = `
+                    <div class="flex flex-col items-end">
+                        <span class="text-sm text-gray-500 mb-1">我</span>
+                        <div class="bg-primary text-white rounded-lg p-3 max-w-[80%] flex items-center gap-2">
+                            <i class="fa fa-image"></i>
+                            <span>${fileName}</span>
+                        </div>
+                    </div>
+                `;
+                chatMessages.insertAdjacentHTML('beforeend', fileMsg);
+                setTimeout(() => {
+                    sendChatMessage(`我上传了一张图片：${fileName}，请你用蓝领的口吻谈谈对这张图片的看法。`);
+                }, 500);
+            }
+        });
+
+        // 5. 编辑用户弹窗
+        const editModal = document.getElementById('editModal');
+        const closeEditBtn = document.getElementById('closeEditBtn');
+        const cancelEditBtn = document.getElementById('cancelEditBtn');
+        const saveEditBtn = document.getElementById('saveEditBtn');
+        const editName = document.getElementById('editName');
+        const editGender = document.getElementById('editGender');
+        const editAge = document.getElementById('editAge');
+        const editJob = document.getElementById('editJob');
+        const editDesc = document.getElementById('editDesc');
+
+        // 绑定编辑按钮事件
+        function bindEditEvents() {
+            document.querySelectorAll('.editUserBtn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const userName = e.currentTarget.dataset.user;
+                    // 填充默认值
+                    editName.value = userName;
+                    editGender.value = userName.includes('姐') ? '女' : '男';
+                    editAge.value = userName === '小张' ? '28' : userName === '王师傅' ? '35' : '42';
+                    editJob.value = userName === '王师傅' ? '建筑工人' : userName === '李大姐' ? '家政服务' : '快递员';
+                    editDesc.value = userName === '王师傅' ? '从业10年，主要做水电安装，期望月薪8000-10000元，关注工作稳定性和社保缴纳。' : 
+                                     userName === '李大姐' ? '从事家政服务8年，擅长保洁和育儿，期望日薪200元以上，关注工作时长和休息时间。' :
+                                     '快递行业5年，熟悉同城配送，期望月薪6000-8000元，关注配送工具和补贴政策。';
+                    
+                    editModal.classList.remove('hidden');
+                });
+            });
+        }
+
+        // 关闭编辑弹窗
+        [closeEditBtn, cancelEditBtn].forEach(btn => {
+            btn.addEventListener('click', () => {
+                editModal.classList.add('hidden');
+            });
+        });
+
+        // 保存编辑
+        saveEditBtn.addEventListener('click', () => {
+            alert('用户信息编辑成功！');
+            editModal.classList.add('hidden');
+        });
+
+        // 初始化绑定事件
+        bindChatEvents();
+        bindEditEvents();
+
+        // 点击弹窗外部关闭
+        window.addEventListener('click', (e) => {
+            if (e.target === chatModal) chatModal.classList.add('hidden');
+            if (e.target === editModal) editModal.classList.add('hidden');
+        });
+
+        // 平滑滚动
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                document.querySelector(this.getAttribute('href')).scrollIntoView({
+                    behavior: 'smooth'
+                });
+            });
+        });
+    </script>
+</body>
+</html>

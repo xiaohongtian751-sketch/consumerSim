@@ -1,0 +1,1665 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>consumerSim - 招聘专属AI虚拟用户</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#10B981', // 主色绿色
+                        secondary: '#F0FDF4', // 淡绿色底色
+                        neutral: '#FFFFFF', // 白色底色
+                        border: '#E5E7EB', // 边框色
+                    },
+                    fontFamily: {
+                        inter: ['Inter', 'system-ui', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+
+    <!-- 批量访谈（精简版）：仅使用聊天框展示与导出，保留 localStorage 数据结构 -->
+    <script>
+        (function () {
+            'use strict';
+
+            // 批量访谈数据仍存储在此 key 下（保留原有数据结构）
+            const STORAGE_KEY = 'batchInterviewData';
+
+            function biNowIso() { return new Date().toISOString(); }
+
+            function biLoad() {
+                try {
+                    const raw = localStorage.getItem(STORAGE_KEY);
+                    const data = raw ? JSON.parse(raw) : null;
+                    if (!data || typeof data !== 'object') return { subjects: [], questionnaire: [], results: [] };
+                    if (!Array.isArray(data.subjects)) data.subjects = [];
+                    if (!Array.isArray(data.questionnaire)) data.questionnaire = [];
+                    if (!Array.isArray(data.results)) data.results = [];
+                    return data;
+                } catch (_) {
+                    return { subjects: [], questionnaire: [], results: [] };
+                }
+            }
+
+            function biSave(data) {
+                try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch (_) {}
+            }
+
+            function biDownload(filename, content, mime) {
+                const blob = new Blob([content], { type: mime || 'text/plain;charset=utf-8' });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                setTimeout(() => URL.revokeObjectURL(a.href), 500);
+            }
+
+            function biCsvEscape(v) {
+                const s = String(v ?? '');
+                if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+                return s;
+            }
+
+            function biGetExistingVirtualUsers() {
+                const names = new Set();
+                document.querySelectorAll('.chatUserBtn[data-user]').forEach(btn => {
+                    const n = (btn.dataset.user || '').trim();
+                    if (n) names.add(n);
+                });
+                return Array.from(names);
+            }
+
+            function biGetCallQwen() {
+                // 复用已有通义千问调用逻辑
+                if (typeof window.callQwenForUser === 'function') return window.callQwenForUser;
+                return null;
+            }
+
+            // 在聊天框中插入一条“系统”消息（左侧、灰色气泡），用于批量访谈过程提示
+            function biAppendSystemMessage(text) {
+                const box = document.getElementById('chatMessages'); // 等价于你概念中的 chat-box
+                if (!box) return;
+                const wrapper = document.createElement('div');
+                wrapper.className = 'flex flex-col batch-interview-system-message';
+                wrapper.innerHTML = `
+                    <span class="text-sm text-gray-500 mb-1">系统</span>
+                    <div class="bg-gray-100 rounded-lg p-3 max-w-[80%] whitespace-pre-wrap text-gray-800 text-sm">
+                        ${text}
+                    </div>
+                `;
+                box.appendChild(wrapper);
+                box.scrollTop = box.scrollHeight;
+            }
+
+            // 在聊天框中以“访谈者”（右侧）形式展示批量访谈问题
+            function biAppendInterviewerQuestion(text) {
+                const box = document.getElementById('chatMessages');
+                if (!box) return;
+                const wrapper = document.createElement('div');
+                wrapper.className = 'flex flex-col items-end batch-interview-question-message';
+                wrapper.innerHTML = `
+                    <span class="text-sm text-gray-500 mb-1">访谈者</span>
+                    <div class="bg-primary text-white rounded-lg p-3 max-w-[80%] whitespace-pre-wrap text-sm">
+                        ${text}
+                    </div>
+                `;
+                box.appendChild(wrapper);
+                box.scrollTop = box.scrollHeight;
+            }
+
+            // 在聊天框中以“访谈对象”（左侧）形式展示单个用户的批量访谈回答
+            function biAppendSubjectAnswer(subjectName, answer) {
+                const box = document.getElementById('chatMessages');
+                if (!box) return;
+                const wrapper = document.createElement('div');
+                wrapper.className = 'flex flex-col batch-interview-answer-message';
+                wrapper.innerHTML = `
+                    <span class="text-sm text-gray-500 mb-1">${subjectName}</span>
+                    <div class="bg-gray-100 rounded-lg p-3 max-w-[80%] whitespace-pre-wrap text-gray-800 text-sm">
+                        ${answer}
+                    </div>
+                `;
+                box.appendChild(wrapper);
+                box.scrollTop = box.scrollHeight;
+            }
+
+            // 核心：一键发起批量访谈（使用当前输入框里的问题，对所有虚拟用户提问）
+            async function biRunBatch() {
+                const callQwen = biGetCallQwen();
+                if (!callQwen) {
+                    alert('未找到通义千问调用函数，无法发起批量访谈。');
+                    return;
+                }
+
+                const allUsers = biGetExistingVirtualUsers();
+                if (!allUsers.length) {
+                    alert('当前没有可用的虚拟用户，请先在虚拟用户库中创建。');
+                    return;
+                }
+
+                // 【修复】多选必须用所有勾选项，不能用 select.value（多选时 .value 只返回第一个选中项，会导致“全选仍只访谈一人”）
+                const checked = Array.from(document.querySelectorAll('.batch-interview-subject-cb:checked')).map(cb => (cb.value || '').trim()).filter(Boolean);
+                let users = checked.length ? checked : [];
+                if (!users.length) {
+                    alert('请至少选择一位访谈对象，可点击「全选」快速选中全部。');
+                    return;
+                }
+
+                // 持久化当前选中的访谈对象（用于刷新/重启后恢复勾选状态）
+                try { localStorage.setItem('batchInterviewSelectedSubjects_v1', JSON.stringify(users)); } catch (_) {}
+
+                const input = document.getElementById('chatInput');
+                const question = (input?.value || '').trim();
+                if (!question) {
+                    alert('请输入要统一提问的问题，再发起批量访谈。');
+                    return;
+                }
+
+                const sendBtn = document.getElementById('sendChatBtn');
+                if (sendBtn) sendBtn.disabled = true;
+
+                // 构造一次性问卷（仅一题：当前问题），并写回 localStorage，保持原结构
+                try {
+                    const data = biLoad();
+                    const subjects = users.map(name => ({ id: `${Date.now()}_${Math.random().toString(16).slice(2)}`, name, meta: '' }));
+                    const qId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+                    const questionItem = { id: qId, type: 'open', text: question, options: [] };
+
+                    const result = {
+                        id: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
+                        startedAt: biNowIso(),
+                        finishedAt: null,
+                        subjects,
+                        questions: [questionItem],
+                        answers: {} // { [userName]: { [qId]: answer } }
+                    };
+                    subjects.forEach(s => { result.answers[s.name] = {}; });
+
+                    const total = users.length;
+                    biAppendSystemMessage(`本次将对 ${total} 位访谈对象依次提问，题目相同；下方按「对象 → 问题 → 回答」分段展示。`);
+
+                    // 先写入一份“进行中结果”，便于刷新/重启后恢复进度
+                    data.subjects = subjects;
+                    data.questionnaire = [questionItem];
+                    data.results = data.results || [];
+                    data.results.unshift(result);
+                    data.results = data.results.slice(0, 10);
+                    biSave(data);
+
+                    let done = 0;
+                    for (const s of subjects) {
+                        // 分段：对象 A → 同一问题 → 回答 → 进度（Y = 当前勾选总数）
+                        biAppendSystemMessage(`── 访谈对象：${s.name} ──`);
+                        biAppendInterviewerQuestion(question);
+
+                        // 写入聊天记录持久化（记录页/重启恢复用）
+                        if (typeof window.__pushMessageToHistory === 'function') {
+                            window.__pushMessageToHistory(s.name, 'user', question);
+                        }
+
+                        try {
+                            const reply = await callQwen(s.name, question);
+                            result.answers[s.name][qId] = reply;
+                            biAppendSubjectAnswer(s.name, reply);
+                            if (typeof window.__pushMessageToHistory === 'function') {
+                                window.__pushMessageToHistory(s.name, 'assistant', reply);
+                            }
+                        } catch (e) {
+                            console.error(e);
+                            result.answers[s.name][qId] = '（调用失败）';
+                            biAppendSystemMessage(`【${s.name}】的回答获取失败。`);
+                            if (typeof window.__pushMessageToHistory === 'function') {
+                                window.__pushMessageToHistory(s.name, 'assistant', '（调用失败）');
+                            }
+                        }
+
+                        done += 1;
+                        biAppendSystemMessage(`已完成 ${done}/${total} 个访谈对象`);
+
+                        // 每个对象完成后都保存一次进度
+                        try {
+                            data.results[0] = result;
+                            biSave(data);
+                        } catch (_) {}
+                    }
+
+                    result.finishedAt = biNowIso();
+                    data.subjects = subjects;
+                    data.questionnaire = [questionItem];
+                    data.results[0] = result;
+                    biSave(data);
+
+                    biAppendSystemMessage('本次批量访谈已全部完成，你可以点击聊天框底部的「导出批量报告」按钮下载结果。');
+                } finally {
+                    if (sendBtn) sendBtn.disabled = false;
+                }
+            }
+
+            // 报告导出：将最近一次批量访谈以 CSV / Excel 导出
+            function biExportLatest() {
+                const data = biLoad();
+                const result = data.results && data.results[0];
+                if (!result) {
+                    alert('暂无可导出的批量访谈结果，请先发起一次批量访谈。');
+                    return;
+                }
+
+                const subjects = result.subjects || [];
+                const users = subjects.map(s => s.name);
+                const question = (result.questions && result.questions[0]?.text) || '';
+                const time = result.finishedAt || result.startedAt || biNowIso();
+                let imageSuggestion = '';
+                try {
+                    const raw = localStorage.getItem('batchInterviewImageSuggestion_v1');
+                    const obj = raw ? JSON.parse(raw) : null;
+                    imageSuggestion = obj?.suggestionText || '';
+                } catch (_) {}
+
+                // CSV：列为 访谈对象, 问题, 回答, 访谈时间
+                const header = ['访谈对象', '问题', '回答', '访谈时间'];
+                const rows = [header];
+                for (const u of users) {
+                    const baseAnswer = (result.answers?.[u]?.[result.questions[0].id]) || '';
+                    const answer = imageSuggestion
+                        ? `${baseAnswer}\n\n[图片访谈建议]\n${imageSuggestion}`
+                        : baseAnswer;
+                    rows.push([u, question, answer, time]);
+                }
+                const csv = rows.map(r => r.map(biCsvEscape).join(',')).join('\n');
+                biDownload('批量访谈报告.csv', csv, 'text/csv;charset=utf-8');
+
+                // Excel：简单 HTML 表
+                const htmlRows = rows.map(r => `<tr>${r.map(c => `<td>${String(c).replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td>`).join('')}</tr>`).join('');
+                const html = `<html><head><meta charset="UTF-8"></head><body><table border="1">${htmlRows}</table></body></html>`;
+                biDownload('批量访谈报告.xls', html, 'application/vnd.ms-excel;charset=utf-8');
+
+                alert('批量访谈报告已导出（CSV/Excel），请在浏览器下载记录中查看。');
+            }
+
+            function biInjectButtons() {
+                const sendBtn = document.getElementById('sendChatBtn');
+                if (!sendBtn || sendBtn.dataset.batchBound === '1') return;
+
+                // 仅保留「导出批量报告」在输入栏旁；发起多对象访谈改由顶部「访谈用户」触发（避免右下角重复按钮）
+                const parent = sendBtn.parentElement;
+                if (!parent) return;
+
+                const exportBtn = document.createElement('button');
+                exportBtn.id = 'batch-interview-export-btn';
+                exportBtn.textContent = '导出批量报告';
+                exportBtn.className = sendBtn.className;
+                exportBtn.classList.add('batch-interview-export-btn');
+                exportBtn.style.marginLeft = '8px';
+
+                parent.appendChild(exportBtn);
+
+                exportBtn.addEventListener('click', biExportLatest);
+
+                sendBtn.dataset.batchBound = '1';
+            }
+
+            function biBind() {
+                biInjectButtons();
+                // 顶部工具条：「访谈用户」→ 发起按勾选列表依次访谈
+                const interviewBarBtn = document.getElementById('batch-interview-user-btn');
+                if (interviewBarBtn && interviewBarBtn.dataset.batchBound !== '1') {
+                    interviewBarBtn.addEventListener('click', biRunBatch);
+                    interviewBarBtn.dataset.batchBound = '1';
+                }
+            }
+
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', biBind);
+            } else {
+                biBind();
+            }
+        })();
+    </script>
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .btn-primary {
+                @apply bg-primary text-white px-6 py-3 rounded-lg font-medium hover:bg-primary/90 transition-colors shadow-md;
+            }
+            .btn-outline {
+                @apply border-2 border-primary text-primary px-6 py-3 rounded-lg font-medium hover:bg-secondary transition-colors;
+            }
+            .card-shadow {
+                @apply shadow-sm hover:shadow-md transition-shadow;
+            }
+            .section-padding {
+                @apply py-20 px-4 sm:px-6 lg:px-8;
+            }
+        }
+
+        /* 批量访谈顶部工具条：与「选择用户」区一致的极简线框按钮，单行 flex-nowrap */
+        #batch-interview-filter.batch-interview-filter {
+            flex-wrap: nowrap;
+        }
+        .batch-interview-bar-btn {
+            flex-shrink: 0;
+            border: 1px solid #e5e7eb;
+            border-radius: 4px;
+            background: #fff;
+            color: #374151;
+            font-size: 12px;
+            font-weight: 500;
+            padding: 4px 10px;
+            line-height: 1.4;
+            white-space: nowrap;
+            cursor: pointer;
+            transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+        }
+        .batch-interview-bar-btn:hover {
+            border-color: #10b981;
+            color: #047857;
+            background-color: #f0fdf4;
+        }
+        #batch-interview-subjects-wrap {
+            scrollbar-width: thin;
+        }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="font-inter">
+    <div class="min-h-screen bg-white">
+        <div class="flex h-screen">
+            <aside class="w-64 shrink-0 border-r border-border bg-white sticky top-0 h-screen">
+                <div class="h-16 px-6 flex items-center border-b border-border">
+                    <button class="text-xl font-semibold text-gray-800" data-nav="home">consumerSim</button>
+                </div>
+                <nav class="p-4 space-y-2">
+                    <button class="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left hover:bg-secondary transition-colors" data-nav="home">
+                        <i class="fa fa-home text-primary w-5 text-center"></i>
+                        <span class="text-gray-700 font-medium">首页（平台介绍）</span>
+                    </button>
+                    <button class="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left hover:bg-secondary transition-colors" data-nav="users">
+                        <i class="fa fa-users text-primary w-5 text-center"></i>
+                        <span class="text-gray-700 font-medium">虚拟用户库</span>
+                    </button>
+                    <button class="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left hover:bg-secondary transition-colors" data-nav="interview">
+                        <i class="fa fa-comments text-primary w-5 text-center"></i>
+                        <span class="text-gray-700 font-medium">访谈用户</span>
+                    </button>
+                    <button class="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left hover:bg-secondary transition-colors" data-nav="batch">
+                        <i class="fa fa-commenting text-primary w-5 text-center"></i>
+                        <span class="text-gray-700 font-medium">批量访谈</span>
+                    </button>
+                    <button class="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left hover:bg-secondary transition-colors" data-nav="records">
+                        <i class="fa fa-file-text-o text-primary w-5 text-center"></i>
+                        <span class="text-gray-700 font-medium">访谈记录汇总</span>
+                    </button>
+                </nav>
+                <div class="px-4">
+                    <div class="mt-4 p-4 bg-secondary rounded-xl border border-border">
+                        <p class="text-sm text-gray-700 font-medium mb-1">绿色简约主题</p>
+                        <p class="text-xs text-gray-600">仅做布局重构，保留原有功能与按钮样式</p>
+                    </div>
+                </div>
+            </aside>
+
+            <div class="flex-1 min-w-0 flex flex-col">
+                <header class="h-16 shrink-0 bg-white border-b border-border sticky top-0 z-40">
+                    <div class="h-full px-6 flex items-center justify-between">
+                        <div class="min-w-0">
+                            <h1 class="text-lg font-semibold text-gray-800 truncate" id="pageTitle">首页（平台介绍）</h1>
+                            <p class="text-xs text-gray-500 truncate" id="pageSubtitle">招聘专属AI虚拟用户 · 蓝领招聘用户调研</p>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button id="gotoUsersBtn" class="btn-outline hidden sm:inline-flex items-center gap-2">
+                                <i class="fa fa-users"></i><span>虚拟用户库</span>
+                            </button>
+                            <button id="gotoRecordsBtn" class="btn-outline hidden sm:inline-flex items-center gap-2">
+                                <i class="fa fa-file-text-o"></i><span>访谈记录</span>
+                            </button>
+                        </div>
+                    </div>
+                </header>
+
+                <main class="flex-1 min-w-0 overflow-y-auto">
+                    <section id="view-home" data-view class="bg-secondary section-padding">
+                        <div class="max-w-7xl mx-auto">
+                            <div class="text-center mb-20">
+                                <h2 class="text-[clamp(2.5rem,6vw,4rem)] font-bold text-gray-900 mb-4">招聘专属AI虚拟用户</h2>
+                                <p class="text-2xl text-gray-700 mb-6">consumerSim</p>
+                                <p class="text-lg text-gray-600 max-w-2xl mx-auto mb-10">无需招募真实用户，立即获取深入的消费者洞察，加速产品和业务决策</p>
+                                <div class="flex flex-col sm:flex-row justify-center gap-4">
+                                    <button class="btn-primary" data-nav="users">进入虚拟用户库</button>
+                                    <button class="btn-outline" data-nav="interview">开始访谈用户</button>
+                                </div>
+                            </div>
+
+                            <div class="bg-neutral rounded-2xl p-8 shadow-md">
+                                <h3 class="text-2xl font-bold text-gray-900 mb-8 text-center">为什么选择consumerSim</h3>
+                                <p class="text-gray-600 text-center mb-12 max-w-3xl mx-auto">与传统用户研究相比，我们的AI驱动解决方案提供了显著的竞争优势</p>
+
+                                <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
+                                    <div class="flex flex-col items-center text-center card-shadow p-6 rounded-xl bg-white">
+                                        <div class="w-16 h-16 bg-secondary rounded-full flex items-center justify-center mb-4">
+                                            <i class="fa fa-money text-primary text-2xl"></i>
+                                        </div>
+                                        <h4 class="text-xl font-semibold mb-2">降低90%研究成本</h4>
+                                        <p class="text-gray-600">无需支付用户招募、场地租赁等费用，大幅降低研究成本</p>
+                                    </div>
+                                    <div class="flex flex-col items-center text-center card-shadow p-6 rounded-xl bg-white">
+                                        <div class="w-16 h-16 bg-secondary rounded-full flex items-center justify-center mb-4">
+                                            <i class="fa fa-clock-o text-primary text-2xl"></i>
+                                        </div>
+                                        <h4 class="text-xl font-semibold mb-2">研究周期缩短95%</h4>
+                                        <p class="text-gray-600">即时生成虚拟用户洞察，无需等待招募和访谈周期</p>
+                                    </div>
+                                    <div class="flex flex-col items-center text-center card-shadow p-6 rounded-xl bg-white">
+                                        <div class="w-16 h-16 bg-secondary rounded-full flex items-center justify-center mb-4">
+                                            <i class="fa fa-users text-primary text-2xl"></i>
+                                        </div>
+                                        <h4 class="text-xl font-semibold mb-2">可扩展的样本规模</h4>
+                                        <p class="text-gray-600">按需生成任意数量的虚拟用户，满足不同样本量需求</p>
+                                    </div>
+                                    <div class="flex flex-col items-center text-center card-shadow p-6 rounded-xl bg-white">
+                                        <div class="w-16 h-16 bg-secondary rounded-full flex items-center justify-center mb-4">
+                                            <i class="fa fa-refresh text-primary text-2xl"></i>
+                                        </div>
+                                        <h4 class="text-xl font-semibold mb-2">无限迭代优化</h4>
+                                        <p class="text-gray-600">根据反馈快速调整虚拟用户模型，持续优化研究结果</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section id="view-users" data-view class="bg-white section-padding hidden">
+                        <div class="max-w-7xl mx-auto">
+                            <h2 class="text-3xl font-bold text-gray-900 mb-10 text-center">虚拟用户库（蓝领画像）</h2>
+
+                            <div class="space-y-8">
+                                <div class="bg-white border border-border rounded-xl shadow-sm">
+                                    <div class="flex justify-between items-center p-6 cursor-pointer" id="guideToggle">
+                                        <h3 class="text-xl font-semibold text-gray-800">用户创建使用指南</h3>
+                                        <i class="fa fa-chevron-down text-gray-500 transition-transform" id="guideIcon"></i>
+                                    </div>
+                                    <div class="p-6 border-t border-border hidden" id="guideContent">
+                                        <ul class="list-disc list-inside text-gray-600 space-y-2">
+                                            <li>填写业务描述和业务目标，清晰描述您的研究方向</li>
+                                            <li>上传访谈记录（支持PDF/MD/TXT格式），辅助AI生成更精准的用户角色</li>
+                                            <li>点击「生成用户角色」按钮，系统将自动生成蓝领相关虚拟用户</li>
+                                            <li>生成后可编辑用户信息，也可与单个虚拟用户进行对话交互</li>
+                                            <li>每次上传新文档，系统会累计生成更多虚拟用户角色</li>
+                                        </ul>
+                                    </div>
+                                </div>
+
+                                <div class="bg-white border border-border rounded-xl shadow-sm p-6">
+                                    <div class="space-y-6">
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-2">业务描述</label>
+                                            <textarea class="w-full border border-border rounded-lg p-3 min-h-[120px] focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none" placeholder="请输入您的业务描述，例如：针对蓝领招聘场景，研究建筑工人的求职偏好和薪资期望..."></textarea>
+                                        </div>
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-2">业务目标</label>
+                                            <textarea class="w-full border border-border rounded-lg p-3 min-h-[120px] focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none" placeholder="请输入您的业务目标，例如：了解蓝领工人对招聘平台的功能需求，优化产品设计..."></textarea>
+                                        </div>
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-2">上传访谈记录</label>
+                                            <div class="border-2 border-dashed border-border rounded-lg p-6 text-center hover:border-primary transition-colors">
+                                                <input type="file" id="fileUpload" accept=".pdf,.md,.txt" class="hidden">
+                                                <label for="fileUpload" class="cursor-pointer">
+                                                    <i class="fa fa-upload text-primary text-3xl mb-2"></i>
+                                                    <p class="text-gray-600 mb-1">点击上传或拖拽文件至此处</p>
+                                                    <p class="text-gray-500 text-sm">支持 PDF、MD、TXT 格式文件</p>
+                                                </label>
+                                                <div id="fileList" class="mt-4 hidden">
+                                                    <div class="flex justify-between items-center p-2 bg-secondary rounded-lg mb-2">
+                                                        <span class="text-gray-700" id="fileName">访谈记录1.txt</span>
+                                                        <span class="text-primary"><i class="fa fa-check"></i> 上传成功</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <button id="generateBtn" class="btn-primary w-full">生成用户角色</button>
+                                    </div>
+                                </div>
+
+                                <div class="bg-white border border-border rounded-xl shadow-sm p-6">
+                                    <div class="flex items-center justify-between gap-4 mb-6">
+                                        <h3 class="text-xl font-semibold text-gray-800">生成的虚拟用户</h3>
+                                        <button class="btn-outline flex items-center gap-2" data-nav="records">
+                                            <i class="fa fa-file-text-o"></i><span>查看访谈记录</span>
+                                        </button>
+                                    </div>
+                                    <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-6" id="userList">
+                                        <div class="border border-border rounded-lg p-4 card-shadow">
+                                            <div class="flex justify-between items-start mb-4">
+                                                <div>
+                                                    <h4 class="text-lg font-semibold">王师傅</h4>
+                                                    <p class="text-gray-500">男性 | 35岁 | 建筑工人</p>
+                                                </div>
+                                                <button class="editUserBtn text-primary hover:text-primary/80" data-user="王师傅">
+                                                    <i class="fa fa-pencil"></i> 编辑
+                                                </button>
+                                            </div>
+                                            <p class="text-gray-600 mb-4">从业10年，主要做水电安装，期望月薪8000-10000元，关注工作稳定性和社保缴纳。</p>
+                                            <button class="chatUserBtn btn-outline w-full" data-user="王师傅">
+                                                <i class="fa fa-comments"></i> 与TA对话
+                                            </button>
+                                        </div>
+
+                                        <div class="border border-border rounded-lg p-4 card-shadow">
+                                            <div class="flex justify-between items-start mb-4">
+                                                <div>
+                                                    <h4 class="text-lg font-semibold">李大姐</h4>
+                                                    <p class="text-gray-500">女性 | 42岁 | 家政服务</p>
+                                                </div>
+                                                <button class="editUserBtn text-primary hover:text-primary/80" data-user="李大姐">
+                                                    <i class="fa fa-pencil"></i> 编辑
+                                                </button>
+                                            </div>
+                                            <p class="text-gray-600 mb-4">从事家政服务8年，擅长保洁和育儿，期望日薪200元以上，关注工作时长和休息时间。</p>
+                                            <button class="chatUserBtn btn-outline w-full" data-user="李大姐">
+                                                <i class="fa fa-comments"></i> 与TA对话
+                                            </button>
+                                        </div>
+
+                                        <div class="border border-border rounded-lg p-4 card-shadow">
+                                            <div class="flex justify-between items-start mb-4">
+                                                <div>
+                                                    <h4 class="text-lg font-semibold">小张</h4>
+                                                    <p class="text-gray-500">男性 | 28岁 | 快递员</p>
+                                                </div>
+                                                <button class="editUserBtn text-primary hover:text-primary/80" data-user="小张">
+                                                    <i class="fa fa-pencil"></i> 编辑
+                                                </button>
+                                            </div>
+                                            <p class="text-gray-600 mb-4">快递行业5年，熟悉同城配送，期望月薪6000-8000元，关注配送工具和补贴政策。</p>
+                                            <button class="chatUserBtn btn-outline w-full" data-user="小张">
+                                                <i class="fa fa-comments"></i> 与TA对话
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section id="view-interview" data-view class="bg-gray-50 section-padding hidden">
+                        <div class="max-w-7xl mx-auto">
+                            <div class="flex items-center justify-between gap-4 mb-6">
+                                <div class="min-w-0">
+                                    <h2 class="text-3xl font-bold text-gray-900 truncate" id="chatTitle">访谈用户</h2>
+                                    <p class="text-gray-600 mt-2" id="interviewHint">从「虚拟用户库」选择一个用户开始访谈。</p>
+                                </div>
+                                <div class="flex items-center gap-3 shrink-0">
+                                    <button id="closeChatBtn" class="btn-outline flex items-center gap-2">
+                                        <i class="fa fa-arrow-left"></i><span>返回用户库</span>
+                                    </button>
+                                    <button id="exportCurrentChatBtn" class="btn-outline flex items-center gap-2" disabled>
+                                        <i class="fa fa-download"></i><span>导出本次访谈</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div id="chatModal" class="bg-white rounded-xl shadow-sm border border-border overflow-hidden flex flex-col min-h-[60vh]">
+                                <!-- 批量访谈工具条：左侧多选（复选框），右侧同一行「全选 / 取消全选 / 访谈用户」 -->
+                                <div id="batch-interview-filter" class="batch-interview-filter flex items-center gap-2 px-4 py-2 border-b border-border bg-gray-50">
+                                    <span class="text-xs text-gray-500 whitespace-nowrap shrink-0">选择访谈对象</span>
+                                    <div id="batch-interview-subjects-wrap" class="flex flex-nowrap items-center gap-3 flex-1 min-w-0 overflow-x-auto py-0.5">
+                                        <span class="text-xs text-gray-400 whitespace-nowrap">加载中…</span>
+                                    </div>
+                                    <button type="button" id="batch-interview-select-all" class="batch-interview-bar-btn" title="勾选全部虚拟用户">全选</button>
+                                    <button type="button" id="batch-interview-clear-all" class="batch-interview-bar-btn" title="取消所有勾选">取消全选</button>
+                                    <button type="button" id="batch-interview-user-btn" class="batch-interview-bar-btn" title="对勾选对象依次发起同一问题的访谈">访谈用户</button>
+                                </div>
+                                <div id="chatMessages" class="flex-1 p-6 overflow-y-auto space-y-4 bg-white">
+                                    <div class="flex flex-col">
+                                        <span class="text-sm text-gray-500 mb-1">系统</span>
+                                        <div class="bg-gray-100 rounded-lg p-3 max-w-[80%]">
+                                            请选择一个虚拟用户开始访谈。我会用接地气的蓝领口吻回答你的问题。
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="p-4 border-t border-border bg-white">
+                                    <div class="flex flex-wrap gap-2 mb-4">
+                                        <button class="quickBtn px-3 py-1 bg-secondary text-primary rounded-full text-sm hover:bg-primary/10">你找工作最关注什么？</button>
+                                        <button class="quickBtn px-3 py-1 bg-secondary text-primary rounded-full text-sm hover:bg-primary/10">期望的薪资是多少？</button>
+                                        <button class="quickBtn px-3 py-1 bg-secondary text-primary rounded-full text-sm hover:bg-primary/10">对招聘平台有什么建议？</button>
+                                    </div>
+
+                                    <div class="flex gap-2">
+                                        <label for="chatFileUpload" class="flex items-center justify-center w-10 h-10 border border-border rounded-lg text-gray-500 hover:text-[#165DFF] hover:bg-gray-50 cursor-pointer">
+                                            <!-- 极简线性上传图标（16x16，描边，无填充） -->
+                                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                                                <path d="M12 16V4"></path>
+                                                <path d="M7 9l5-5 5 5"></path>
+                                                <path d="M20 16v4H4v-4"></path>
+                                            </svg>
+                                        </label>
+                                        <input type="file" id="chatFileUpload" accept="image/*" class="hidden">
+                                        <input type="text" id="chatInput" class="flex-1 border border-border rounded-lg p-3 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none" placeholder="请输入问题...">
+                                        <button id="sendChatBtn" class="bg-primary text-white px-4 rounded-lg hover:bg-primary/90 transition-colors">发送</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section id="view-batch" data-view class="bg-white section-padding hidden">
+                        <div class="max-w-7xl mx-auto">
+                            <div class="bg-white border border-border rounded-xl shadow-sm p-8">
+                                <h2 class="text-3xl font-bold text-gray-900 mb-4">批量访谈（已集成到聊天框）</h2>
+                                <p class="text-gray-600 mb-4">
+                                    现在所有批量访谈操作都在「访谈用户」页面的聊天框内完成：
+                                </p>
+                                <ul class="list-disc list-inside text-gray-600 space-y-1 text-sm">
+                                    <li>在聊天框顶部勾选访谈对象，或使用「全选」；再点击「访谈用户」发起多对象访谈。</li>
+                                    <li>在输入框中输入统一问题，勾选访谈对象后点击顶部「访谈用户」，系统会按顺序询问每位对象并以对话形式展示回答。</li>
+                                    <li>所有批量访谈结果会自动写入本地存储，可在聊天框底部点击「导出批量报告」以 CSV/Excel 形式导出。</li>
+                                </ul>
+                                <p class="text-xs text-gray-400 mt-6">
+                                    （根据你的需求，本页面仅保留说明文案，不再包含独立的表格或操作模块。）
+                                </p>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section id="view-records" data-view class="bg-white section-padding hidden">
+                        <div class="max-w-7xl mx-auto">
+                            <div class="flex items-center justify-between gap-4 mb-8">
+                                <div class="min-w-0">
+                                    <h2 class="text-3xl font-bold text-gray-900 truncate">访谈记录汇总</h2>
+                                    <p class="text-gray-600 mt-2">自动保存所有虚拟用户访谈记录，可查看与导出。</p>
+                                </div>
+                                <div class="flex items-center gap-3 shrink-0">
+                                    <button id="exportAllBtn" class="btn-primary flex items-center gap-2">
+                                        <i class="fa fa-download"></i><span>导出全部记录</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="grid lg:grid-cols-3 gap-6">
+                                <div class="lg:col-span-1">
+                                    <div class="bg-white border border-border rounded-xl shadow-sm overflow-hidden">
+                                        <div class="p-4 border-b border-border flex items-center justify-between gap-2">
+                                            <h3 class="font-semibold text-gray-800">访谈列表</h3>
+                                            <button id="clearHistoryBtn" class="text-sm text-gray-500 hover:text-gray-700">清空</button>
+                                        </div>
+                                        <div id="historyList" class="divide-y divide-border max-h-[60vh] overflow-y-auto">
+                                            <div class="p-4 text-sm text-gray-500">暂无访谈记录。</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="lg:col-span-2">
+                                    <div class="bg-white border border-border rounded-xl shadow-sm overflow-hidden flex flex-col min-h-[60vh]">
+                                        <div class="p-4 border-b border-border flex items-center justify-between gap-3">
+                                            <div class="min-w-0">
+                                                <h3 class="font-semibold text-gray-800 truncate" id="recordTitle">选择一条访谈记录查看</h3>
+                                                <p class="text-xs text-gray-500 truncate" id="recordMeta"></p>
+                                            </div>
+                                            <div class="flex items-center gap-2 shrink-0">
+                                                <button id="openInInterviewBtn" class="btn-outline flex items-center gap-2" disabled>
+                                                    <i class="fa fa-comments"></i><span>继续访谈</span>
+                                                </button>
+                                                <button id="exportSelectedBtn" class="btn-outline flex items-center gap-2" disabled>
+                                                    <i class="fa fa-download"></i><span>导出当前</span>
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div id="recordViewer" class="flex-1 p-6 overflow-y-auto space-y-4 bg-white">
+                                            <div class="text-sm text-gray-500">暂无内容。</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                </main>
+            </div>
+        </div>
+    </div>
+
+    <!-- 编辑用户弹窗 -->
+    <div id="editModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-xl font-semibold text-gray-800">编辑用户信息</h3>
+                <button id="closeEditBtn" class="text-gray-500 hover:text-gray-700">
+                    <i class="fa fa-times text-xl"></i>
+                </button>
+            </div>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">姓名</label>
+                    <input type="text" id="editName" class="w-full border border-border rounded-lg p-2 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">性别</label>
+                    <select id="editGender" class="w-full border border-border rounded-lg p-2 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none bg-white">
+                        <option value="男">男</option>
+                        <option value="女">女</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">年龄</label>
+                    <input type="number" id="editAge" class="w-full border border-border rounded-lg p-2 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">职业</label>
+                    <input type="text" id="editJob" class="w-full border border-border rounded-lg p-2 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">用户描述</label>
+                    <textarea id="editDesc" class="w-full border border-border rounded-lg p-2 focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none min-h-[100px]"></textarea>
+                </div>
+            </div>
+            <div class="mt-6 flex justify-end gap-3">
+                <button id="cancelEditBtn" class="px-4 py-2 border border-border rounded-lg text-gray-700 hover:bg-gray-50">
+                    取消
+                </button>
+                <button id="saveEditBtn" class="btn-primary">
+                    保存
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 核心交互逻辑 -->
+    <script>
+        // SPA：页面切换（左侧固定侧边栏 + 顶部标题栏）
+        const VIEWS = [
+            { key: 'home', title: '首页（平台介绍）', subtitle: '招聘专属AI虚拟用户 · 蓝领招聘用户调研', elId: 'view-home' },
+            { key: 'users', title: '虚拟用户库', subtitle: '用户列表与生成新用户', elId: 'view-users' },
+            { key: 'interview', title: '访谈用户', subtitle: '与一个或多个虚拟用户进行访谈', elId: 'view-interview' },
+            { key: 'batch', title: '批量访谈', subtitle: '向多个虚拟用户提同一个问题并对比', elId: 'view-batch' },
+            { key: 'records', title: '访谈记录汇总', subtitle: '查看、管理、导出对话历史', elId: 'view-records' },
+        ];
+
+        const pageTitle = document.getElementById('pageTitle');
+        const pageSubtitle = document.getElementById('pageSubtitle');
+
+        function setActiveNav(viewKey) {
+            document.querySelectorAll('[data-nav]').forEach(btn => {
+                const isActive = btn.dataset.nav === viewKey;
+                btn.classList.toggle('bg-secondary', isActive);
+            });
+        }
+
+        function showView(viewKey) {
+            const v = VIEWS.find(x => x.key === viewKey) || VIEWS[0];
+            VIEWS.forEach(x => {
+                const el = document.getElementById(x.elId);
+                if (el) el.classList.toggle('hidden', x.key !== v.key);
+            });
+            if (pageTitle) pageTitle.textContent = v.title;
+            if (pageSubtitle) pageSubtitle.textContent = v.subtitle;
+            setActiveNav(v.key);
+            try { history.replaceState(null, '', `#${v.key}`); } catch (_) {}
+
+            // 进入“访谈用户”视图时，自动从本地存储恢复聊天框内容
+            if (v.key === 'interview') {
+                try { restoreActiveChatUI(); } catch (e) { console.error('restoreActiveChatUI failed', e); }
+            }
+        }
+
+        function bindNav() {
+            document.querySelectorAll('[data-nav]').forEach(btn => {
+                btn.addEventListener('click', () => showView(btn.dataset.nav));
+            });
+            const gotoUsersBtn = document.getElementById('gotoUsersBtn');
+            const gotoRecordsBtn = document.getElementById('gotoRecordsBtn');
+            if (gotoUsersBtn) gotoUsersBtn.addEventListener('click', () => showView('users'));
+            if (gotoRecordsBtn) gotoRecordsBtn.addEventListener('click', () => showView('records'));
+        }
+
+        // 1. 指南展开/折叠
+        const guideToggle = document.getElementById('guideToggle');
+        const guideContent = document.getElementById('guideContent');
+        const guideIcon = document.getElementById('guideIcon');
+        
+        guideToggle.addEventListener('click', () => {
+            guideContent.classList.toggle('hidden');
+            guideIcon.classList.toggle('rotate-180');
+        });
+
+        // 2. 文件上传反馈
+        const fileUpload = document.getElementById('fileUpload');
+        const fileList = document.getElementById('fileList');
+        
+        fileUpload.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                fileList.classList.remove('hidden');
+                document.getElementById('fileName').textContent = e.target.files[0].name;
+                
+                // 模拟上传成功反馈
+                setTimeout(() => {
+                    alert('文件上传成功！');
+                }, 500);
+            }
+        });
+
+        // 3. 生成用户角色按钮
+        const generateBtn = document.getElementById('generateBtn');
+        const userList = document.getElementById('userList');
+        
+        generateBtn.addEventListener('click', () => {
+            // 模拟生成新用户
+            const newUser = `
+                <div class="border border-border rounded-lg p-4 card-shadow">
+                    <div class="flex justify-between items-start mb-4">
+                        <div>
+                            <h4 class="text-lg font-semibold">刘师傅</h4>
+                            <p class="text-gray-500">男性 | 40岁 | 装修工人</p>
+                        </div>
+                        <button class="editUserBtn text-primary hover:text-primary/80" data-user="刘师傅">
+                            <i class="fa fa-pencil"></i> 编辑
+                        </button>
+                    </div>
+                    <p class="text-gray-600 mb-4">
+                        装修行业15年，擅长木工和油漆，期望月薪9000-12000元，关注工作安全和工程款结算。
+                    </p>
+                    <button class="chatUserBtn btn-outline w-full" data-user="刘师傅">
+                        <i class="fa fa-comments"></i> 与TA对话
+                    </button>
+                </div>
+            `;
+            userList.insertAdjacentHTML('beforeend', newUser);
+            
+            // 重新绑定事件，并刷新批量访谈下拉框中的访谈对象
+            bindChatEvents();
+            bindEditEvents();
+            batchInterviewRefreshSubjects();
+            
+            alert('用户角色生成成功！已新增1个蓝领虚拟用户');
+        });
+
+        // 4. 聊天弹窗交互 - 通义千问API配置
+        const API_CONFIG = {
+    url: "http://localhost:5000/api/chat", // 现在调用本地代理
+    model: "qwen-turbo"
+};
+
+        const chatModal = document.getElementById('chatModal'); // 保留ID，但已改为主内容区
+        const closeChatBtn = document.getElementById('closeChatBtn');
+        const sendChatBtn = document.getElementById('sendChatBtn');
+        const chatInput = document.getElementById('chatInput');
+        const chatMessages = document.getElementById('chatMessages');
+        const chatTitle = document.getElementById('chatTitle');
+        const chatFileUpload = document.getElementById('chatFileUpload');
+        const interviewHint = document.getElementById('interviewHint');
+        const exportCurrentChatBtn = document.getElementById('exportCurrentChatBtn');
+
+        function getActiveUserNameFromTitle() {
+            const t = (chatTitle?.textContent || '').trim();
+            if (t === '访谈用户') return '';
+            if (t.startsWith('与') && t.endsWith('对话')) return t.replace('与', '').replace('对话', '').trim();
+            return t;
+        }
+
+        // 恢复聊天框（对话式展示）到页面刷新后的可见状态
+        function restoreActiveChatUI() {
+            if (!chatMessages || !chatTitle) return;
+            const activeUserName = getActiveUserNameFromTitle();
+            if (activeUserName) {
+                // 一对一：从访谈历史恢复到聊天框
+                const rec = interviewHistory.find(r => r.userName === activeUserName);
+                chatMessages.innerHTML = '';
+                if (!rec || !(rec.messages || []).length) {
+                    chatMessages.innerHTML = `
+                        <div class="flex flex-col">
+                            <span class="text-sm text-gray-500 mb-1">系统</span>
+                            <div class="bg-gray-100 rounded-lg p-3 max-w-[80%] whitespace-pre-wrap text-gray-800 text-sm">
+                                请选择一个虚拟用户开始访谈。我会用接地气的蓝领口吻回答你的问题。
+                            </div>
+                        </div>
+                    `;
+                    return;
+                }
+                rec.messages.forEach(m => {
+                    if (m.role === 'user') {
+                        chatMessages.insertAdjacentHTML('beforeend', `
+                            <div class="flex flex-col items-end">
+                                <span class="text-sm text-gray-500 mb-1">我</span>
+                                <div class="bg-primary text-white rounded-lg p-3 max-w-[80%] whitespace-pre-wrap">${m.content}</div>
+                            </div>
+                        `);
+                    } else {
+                        chatMessages.insertAdjacentHTML('beforeend', `
+                            <div class="flex flex-col">
+                                <span class="text-sm text-gray-500 mb-1">${activeUserName}</span>
+                                <div class="bg-gray-100 rounded-lg p-3 max-w-[80%] whitespace-pre-wrap text-gray-800 text-sm">${m.content}</div>
+                            </div>
+                        `);
+                    }
+                });
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+                return;
+            }
+
+            // 批量：从 batchInterviewData 恢复对象选择、问题与问答进度
+            try {
+                const raw = localStorage.getItem('batchInterviewData');
+                const data = raw ? JSON.parse(raw) : null;
+                const result = data?.results?.[0];
+                chatMessages.innerHTML = '';
+                if (!result || !Array.isArray(result.subjects) || !result.questions?.length) {
+                    chatMessages.innerHTML = `
+                        <div class="flex flex-col">
+                            <span class="text-sm text-gray-500 mb-1">系统</span>
+                            <div class="bg-gray-100 rounded-lg p-3 max-w-[80%] whitespace-pre-wrap text-gray-800 text-sm">
+                                请选择访谈对象并点击「访谈用户」发起批量访谈。
+                            </div>
+                        </div>
+                    `;
+                    return;
+                }
+
+                const question = result.questions[0]?.text || '';
+                const qId = result.questions[0]?.id;
+                const subjects = result.subjects;
+                const total = subjects.length;
+
+                // 恢复顶部勾选状态
+                const subjectNames = subjects.map(s => s.name);
+                try { localStorage.setItem('batchInterviewSelectedSubjects_v1', JSON.stringify(subjectNames)); } catch (_) {}
+                document.querySelectorAll('.batch-interview-subject-cb').forEach(cb => {
+                    cb.checked = subjectNames.includes(cb.value);
+                });
+
+                // 恢复图片访谈建议（如果用户之前上传过图片）
+                try {
+                    const rawImg = localStorage.getItem('batchInterviewImageSuggestion_v1');
+                    const imgObj = rawImg ? JSON.parse(rawImg) : null;
+                    if (imgObj?.suggestionText) {
+                        chatMessages.insertAdjacentHTML('beforeend', `
+                            <div class="flex flex-col">
+                                <span class="text-sm text-gray-500 mb-1">系统</span>
+                                <div class="bg-gray-100 rounded-lg p-3 max-w-[80%] whitespace-pre-wrap text-gray-800 text-sm">
+                                    ${imgObj.fileName ? `（图片：${imgObj.fileName}）\n` : ''}${imgObj.suggestionText}
+                                </div>
+                            </div>
+                        `);
+                    }
+                } catch (_) {}
+
+                let done = 0;
+                subjects.forEach(s => {
+                    const answer = result.answers?.[s.name]?.[qId] || '';
+                    const hasAnswer = String(answer || '').trim().length > 0;
+                    if (hasAnswer) done += 1;
+
+                    chatMessages.insertAdjacentHTML('beforeend', `
+                        <div class="flex flex-col">
+                            <span class="text-sm text-gray-500 mb-1">系统</span>
+                            <div class="bg-gray-100 rounded-lg p-3 max-w-[80%] whitespace-pre-wrap text-gray-800 text-sm">
+                                ── 访谈对象：${s.name} ──
+                            </div>
+                        </div>
+                    `);
+
+                    chatMessages.insertAdjacentHTML('beforeend', `
+                        <div class="flex flex-col items-end">
+                            <span class="text-sm text-gray-500 mb-1">访谈者</span>
+                            <div class="bg-primary text-white rounded-lg p-3 max-w-[80%] whitespace-pre-wrap text-sm">${question}</div>
+                        </div>
+                    `);
+
+                    chatMessages.insertAdjacentHTML('beforeend', `
+                        <div class="flex flex-col">
+                            <span class="text-sm text-gray-500 mb-1">${s.name}</span>
+                            <div class="bg-gray-100 rounded-lg p-3 max-w-[80%] whitespace-pre-wrap text-gray-800 text-sm">
+                                ${hasAnswer ? answer : '（尚未完成）'}
+                            </div>
+                        </div>
+                    `);
+
+                    chatMessages.insertAdjacentHTML('beforeend', `
+                        <div class="flex flex-col">
+                            <span class="text-sm text-gray-500 mb-1">系统</span>
+                            <div class="bg-gray-100 rounded-lg p-3 max-w-[80%] whitespace-pre-wrap text-gray-800 text-sm">
+                                已完成 ${done}/${total} 个访谈对象
+                            </div>
+                        </div>
+                    `);
+                });
+
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            } catch (e) {
+                console.error('restore batch chat failed', e);
+            }
+        }
+
+        // 复用的通义千问调用（给一对一/批量共用）
+        async function callQwenForUser(userName, message) {
+            const response = await fetch(API_CONFIG.url, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${API_CONFIG.key}`
+                },
+                body: JSON.stringify({
+                    model: API_CONFIG.model,
+                    input: {
+                        messages: [
+                            {
+                                role: "system",
+                                content: `你是一个蓝领虚拟用户，角色是：${userName}。
+                                    请用口语化、接地气的蓝领口吻回答问题，不要太书面，要符合你的职业身份（比如家政/建筑/快递等）。`
+                            },
+                            { role: "user", content: message }
+                        ]
+                    },
+                    parameters: {
+                        temperature: 0.7,
+                        max_tokens: 500,
+                        result_format: "text"
+                    }
+                })
+            });
+            const data = await response.json();
+            return data.output?.text || "抱歉，我现在有点忙，稍后再回复你~";
+        }
+
+        // 供头部批量访谈脚本通过 biGetCallQwen() 复用，否则 IIFE 先于本函数执行会拿不到引用
+        window.callQwenForUser = callQwenForUser;
+
+        // 对话历史（本地存储）
+        const STORAGE_KEY = 'consumerSim_interview_history_v1';
+        let interviewHistory = [];
+        let selectedRecordId = null;
+
+        function safeLoadHistory() {
+            try {
+                const raw = localStorage.getItem(STORAGE_KEY);
+                interviewHistory = raw ? JSON.parse(raw) : [];
+                if (!Array.isArray(interviewHistory)) interviewHistory = [];
+            } catch (_) {
+                interviewHistory = [];
+            }
+        }
+
+        function safeSaveHistory() {
+            try { localStorage.setItem(STORAGE_KEY, JSON.stringify(interviewHistory)); } catch (_) {}
+        }
+
+        function nowIso() { return new Date().toISOString(); }
+
+        function ensureRecordForUser(userName) {
+            if (!userName) return null;
+            let rec = interviewHistory.find(r => r.userName === userName);
+            if (!rec) {
+                rec = { id: `${Date.now()}_${Math.random().toString(16).slice(2)}`, userName, createdAt: nowIso(), updatedAt: nowIso(), messages: [] };
+                interviewHistory.unshift(rec);
+            }
+            return rec;
+        }
+
+        function pushMessageToHistory(userName, role, content) {
+            if (!userName || !content) return;
+            const rec = ensureRecordForUser(userName);
+            rec.messages.push({ at: nowIso(), role, content });
+            rec.updatedAt = nowIso();
+            interviewHistory = [rec, ...interviewHistory.filter(r => r.id !== rec.id)];
+            safeSaveHistory();
+            renderHistoryList();
+            if (selectedRecordId === rec.id) renderRecordViewer(rec.id);
+        }
+
+        // 供头部批量访谈脚本复用：把批量问答写入同一套“聊天记录持久化”结构
+        window.__pushMessageToHistory = pushMessageToHistory;
+
+        // 绑定聊天按钮事件
+        function bindChatEvents() {
+            document.querySelectorAll('.chatUserBtn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const userName = e.currentTarget.dataset.user;
+                    chatTitle.textContent = `与${userName}对话`;
+                    if (interviewHint) interviewHint.textContent = `正在访谈：${userName}（记录会自动保存，可在「访谈记录汇总」查看/导出）`;
+                    if (exportCurrentChatBtn) exportCurrentChatBtn.disabled = false;
+                    ensureRecordForUser(userName);
+                    safeSaveHistory();
+                    renderHistoryList();
+                    showView('interview');
+                    chatInput.focus();
+                });
+            });
+        }
+
+        // 关闭聊天（返回用户库）
+        closeChatBtn.addEventListener('click', () => {
+            showView('users');
+        });
+
+        // 发送聊天消息到通义千问API
+        async function sendChatMessage(message) {
+            if (!message.trim()) return;
+            const activeUserName = getActiveUserNameFromTitle();
+            if (!activeUserName) {
+                alert('请先从「虚拟用户库」选择一个用户开始访谈。');
+                return;
+            }
+            
+            // 1. 显示用户消息
+            const userMsg = `
+                <div class="flex flex-col items-end">
+                    <span class="text-sm text-gray-500 mb-1">我</span>
+                    <div class="bg-primary text-white rounded-lg p-3 max-w-[80%]">
+                        ${message}
+                    </div>
+                </div>
+            `;
+            chatMessages.insertAdjacentHTML('beforeend', userMsg);
+            pushMessageToHistory(activeUserName, 'user', message);
+            chatInput.value = '';
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            // 2. 显示加载状态
+            const thinkingMsg = `
+                <div class="flex flex-col">
+                    <span class="text-sm text-gray-500 mb-1">${activeUserName}</span>
+                    <div class="bg-gray-100 rounded-lg p-3 max-w-[80%]">
+                        <i class="fa fa-circle-o-notch fa-spin"></i> 正在思考...
+                    </div>
+                </div>
+            `;
+            chatMessages.insertAdjacentHTML('beforeend', thinkingMsg);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            try {
+                // 3. 调用通义千问API（复用）
+                const aiReply = await callQwenForUser(activeUserName, message);
+
+                // 4. 显示AI回答
+                const thinkingEl = chatMessages.querySelector('.fa-circle-o-notch').closest('div');
+                thinkingEl.innerHTML = `
+                    <span class="text-sm text-gray-500 mb-1">${activeUserName}</span>
+                    <div class="bg-gray-100 rounded-lg p-3 max-w-[80%]">
+                        ${aiReply}
+                    </div>
+                `;
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+                pushMessageToHistory(activeUserName, 'assistant', aiReply);
+
+            } catch (error) {
+                // 错误处理
+                console.error("API调用失败：", error);
+                const thinkingEl = chatMessages.querySelector('.fa-circle-o-notch').closest('div');
+                thinkingEl.innerHTML = `
+                    <span class="text-sm text-gray-500 mb-1">${activeUserName}</span>
+                    <div class="bg-gray-100 rounded-lg p-3 max-w-[80%] text-red-500">
+                        抱歉，网络有点问题，暂时无法回复你。
+                    </div>
+                `;
+            }
+        }
+
+        // 发送按钮点击事件
+        sendChatBtn.addEventListener('click', () => {
+            // 核心：直接把聊天框输入转成普通一对一“提问消息”，走 sendChatMessage 的本地 DOM 展示 + AI 回复逻辑
+            sendChatMessage(chatInput.value);
+        });
+
+        // 回车发送
+        chatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendChatMessage(chatInput.value);
+            }
+        });
+
+        // 快捷提问按钮（聊天区为主内容区，按钮可能被重新渲染）
+        function bindQuickBtns() {
+            document.querySelectorAll('.quickBtn').forEach(btn => {
+                btn.addEventListener('click', () => sendChatMessage(btn.textContent));
+            });
+        }
+
+        function getAllVirtualUserNames() {
+            const names = new Set();
+            document.querySelectorAll('.chatUserBtn[data-user]').forEach(btn => {
+                const n = (btn.dataset.user || '').trim();
+                if (n) names.add(n);
+            });
+            return Array.from(names);
+        }
+
+        function batchInterviewEscapeHtml(s) {
+            return String(s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        // 批量访谈对象勾选状态持久化（用于刷新/重启恢复）
+        const BATCH_SELECTED_KEY = 'batchInterviewSelectedSubjects_v1';
+
+        function batchInterviewPersistSelection() {
+            try {
+                const selected = Array.from(document.querySelectorAll('.batch-interview-subject-cb:checked'))
+                    .map(cb => (cb.value || '').trim())
+                    .filter(Boolean);
+                localStorage.setItem(BATCH_SELECTED_KEY, JSON.stringify(selected));
+            } catch (_) {}
+        }
+
+        function batchInterviewApplySavedSelection() {
+            try {
+                const raw = localStorage.getItem(BATCH_SELECTED_KEY);
+                const saved = raw ? JSON.parse(raw) : [];
+                if (!Array.isArray(saved)) return;
+                const savedSet = new Set(saved.map(x => String(x)));
+                document.querySelectorAll('.batch-interview-subject-cb').forEach(cb => {
+                    cb.checked = savedSet.has(cb.value);
+                });
+            } catch (_) {}
+        }
+
+        // 刷新聊天框顶部「选择访谈对象」复选框列表（与全选/访谈用户同一数据源）
+        function batchInterviewRefreshSubjects() {
+            const wrap = document.getElementById('batch-interview-subjects-wrap');
+            if (!wrap) return;
+            const names = getAllVirtualUserNames();
+            if (!names.length) {
+                wrap.innerHTML = '<span class="text-xs text-gray-400 whitespace-nowrap">暂无虚拟用户，请先在用户库生成</span>';
+                return;
+            }
+            wrap.innerHTML = names.map(n => {
+                const safe = batchInterviewEscapeHtml(n);
+                return `
+                <label class="flex items-center gap-1 shrink-0 whitespace-nowrap cursor-pointer text-xs text-gray-700 batch-interview-subject-label">
+                    <input type="checkbox" class="batch-interview-subject-cb rounded border-gray-300 text-primary focus:ring-primary/40" value="${safe}">
+                    <span>${safe}</span>
+                </label>
+            `;
+            }).join('');
+
+            // 页面刷新后恢复勾选状态
+            batchInterviewApplySavedSelection();
+
+            // 监听勾选变化，实时持久化
+            wrap.querySelectorAll('.batch-interview-subject-cb').forEach(cb => {
+                cb.addEventListener('change', () => batchInterviewPersistSelection());
+            });
+        }
+
+        // 全选 / 取消全选：直接操作复选框，避免依赖 select multiple + .value 的浏览器歧义
+        const batchInterviewSelectAllBtn = document.getElementById('batch-interview-select-all');
+        const batchInterviewClearAllBtn = document.getElementById('batch-interview-clear-all');
+        if (batchInterviewSelectAllBtn) {
+            batchInterviewSelectAllBtn.addEventListener('click', () => {
+                document.querySelectorAll('.batch-interview-subject-cb').forEach(cb => { cb.checked = true; });
+                batchInterviewPersistSelection();
+            });
+        }
+        if (batchInterviewClearAllBtn) {
+            batchInterviewClearAllBtn.addEventListener('click', () => {
+                document.querySelectorAll('.batch-interview-subject-cb').forEach(cb => { cb.checked = false; });
+                batchInterviewPersistSelection();
+            });
+        }
+
+        // 图片上传
+        chatFileUpload.addEventListener('change', (e) => {
+            const file = e.target.files && e.target.files[0];
+            if (!file) return;
+
+            const activeUserName = getActiveUserNameFromTitle();
+            const isBatchMode = !activeUserName;
+
+            const okTypes = ['image/png', 'image/jpeg'];
+            if (!okTypes.includes(file.type)) {
+                // 格式错误提示（写入对话流 + 持久化）
+                const msg = '图片格式不支持，请上传 JPG 或 PNG。';
+                if (isBatchMode) {
+                    chatMessages.insertAdjacentHTML('beforeend', `
+                        <div class="flex flex-col">
+                            <span class="text-sm text-gray-500 mb-1">系统</span>
+                            <div class="bg-gray-100 rounded-lg p-3 max-w-[80%] whitespace-pre-wrap text-red-500 text-sm">${msg}</div>
+                        </div>
+                    `);
+                } else {
+                    chatMessages.insertAdjacentHTML('beforeend', `
+                        <div class="flex flex-col">
+                            <span class="text-sm text-gray-500 mb-1">${activeUserName}</span>
+                            <div class="bg-gray-100 rounded-lg p-3 max-w-[80%] whitespace-pre-wrap text-red-500 text-sm">${msg}</div>
+                        </div>
+                    `);
+                    pushMessageToHistory(activeUserName, 'assistant', msg);
+                }
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+                e.target.value = '';
+                return;
+            }
+
+            const reader = new FileReader();
+            // 关键步骤：FileReader -> dataURL（本地读取图片，不依赖复杂 AI）
+            reader.onerror = () => {
+                const msg = '图片读取失败，请重试。';
+                if (isBatchMode) {
+                    chatMessages.insertAdjacentHTML('beforeend', `
+                        <div class="flex flex-col">
+                            <span class="text-sm text-gray-500 mb-1">系统</span>
+                            <div class="bg-gray-100 rounded-lg p-3 max-w-[80%] whitespace-pre-wrap text-red-500 text-sm">${msg}</div>
+                        </div>
+                    `);
+                } else {
+                    chatMessages.insertAdjacentHTML('beforeend', `
+                        <div class="flex flex-col">
+                            <span class="text-sm text-gray-500 mb-1">${activeUserName}</span>
+                            <div class="bg-gray-100 rounded-lg p-3 max-w-[80%] whitespace-pre-wrap text-red-500 text-sm">${msg}</div>
+                        </div>
+                    `);
+                    pushMessageToHistory(activeUserName, 'assistant', msg);
+                }
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            };
+
+            reader.onload = () => {
+                const dataUrl = String(reader.result || '');
+                const fileName = file.name || '未命名图片';
+
+                // 1) 用户消息：展示缩略图（<=200px，不影响对话流）
+                chatMessages.insertAdjacentHTML('beforeend', `
+                    <div class="flex flex-col items-end">
+                        <span class="text-sm text-gray-500 mb-1">我</span>
+                        <div class="bg-primary text-white rounded-lg p-3 max-w-[80%] whitespace-pre-wrap">
+                            <div class="text-xs opacity-90 mb-2">${fileName}</div>
+                            <img src="${dataUrl}" alt="${fileName}" style="max-width:200px;max-height:200px;object-fit:contain;border-radius:4px;"/>
+                        </div>
+                    </div>
+                `);
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+
+                // 2) 写入历史（仅存文本，避免 localStorage 过大）
+                if (!isBatchMode) {
+                    pushMessageToHistory(activeUserName, 'user', `我上传了一张图片：${fileName}`);
+                }
+
+                const kb = Math.max(1, Math.round(file.size / 1024));
+
+                // 3) 解析图片尺寸（用于“轻量识别”生成访谈建议）
+                const img = new Image();
+                // 关键步骤：让浏览器解码图片，拿到宽高，再生成“轻量访谈建议”
+                img.onload = () => {
+                    const w = img.naturalWidth || img.width || 0;
+                    const h = img.naturalHeight || img.height || 0;
+                    const ratio = h ? (w / h) : 1;
+                    const shape = ratio > 1.2 ? '横向场景' : (ratio < 0.8 ? '竖向细节' : '偏方形画面');
+
+                    const suggestionText =
+                        `我已读取到你上传的图片（${shape}，${w}×${h}，约 ${kb}KB）。\n\n` +
+                        `你可以按下面思路向访谈对象提问：\n` +
+                        `1）看到图片的第一反应是什么？\n` +
+                        `2）图片里的场景/信息和他们的工作或求职经历有什么关联？\n` +
+                        `3）如果把图片换成招聘页面，你希望看到哪些关键信息（薪资、工时、社保等）？`;
+
+                    // 4) 对话式展示建议（不依赖复杂 AI，先本地生成）
+                    chatMessages.insertAdjacentHTML('beforeend', `
+                        <div class="flex flex-col">
+                            <span class="text-sm text-gray-500 mb-1">${isBatchMode ? '系统' : activeUserName}</span>
+                            <div class="bg-gray-100 rounded-lg p-3 max-w-[80%] whitespace-pre-wrap text-gray-800 text-sm">${suggestionText}</div>
+                        </div>
+                    `);
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                    if (!isBatchMode) {
+                        pushMessageToHistory(activeUserName, 'assistant', suggestionText);
+                    } else {
+                        try {
+                            localStorage.setItem('batchInterviewImageSuggestion_v1', JSON.stringify({
+                                fileName,
+                                suggestionText,
+                                at: new Date().toISOString()
+                            }));
+                        } catch (_) {}
+                    }
+                    e.target.value = '';
+                };
+
+                img.onerror = () => {
+                    // 识别失败兜底：只用文件信息生成建议
+                    const msg = `图片解析失败（${fileName}），但我仍可以根据文件信息给出访谈建议。`;
+                    chatMessages.insertAdjacentHTML('beforeend', `
+                        <div class="flex flex-col">
+                            <span class="text-sm text-gray-500 mb-1">${isBatchMode ? '系统' : activeUserName}</span>
+                            <div class="bg-gray-100 rounded-lg p-3 max-w-[80%] whitespace-pre-wrap text-gray-800 text-sm">${msg}</div>
+                        </div>
+                    `);
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                    if (!isBatchMode) {
+                        pushMessageToHistory(activeUserName, 'assistant', msg);
+                    } else {
+                        try {
+                            localStorage.setItem('batchInterviewImageSuggestion_v1', JSON.stringify({
+                                fileName,
+                                suggestionText: msg,
+                                at: new Date().toISOString()
+                            }));
+                        } catch (_) {}
+                    }
+                    e.target.value = '';
+                };
+
+                img.src = dataUrl;
+            };
+
+            reader.readAsDataURL(file);
+        });
+
+        // 5. 编辑用户弹窗
+        const editModal = document.getElementById('editModal');
+        const closeEditBtn = document.getElementById('closeEditBtn');
+        const cancelEditBtn = document.getElementById('cancelEditBtn');
+        const saveEditBtn = document.getElementById('saveEditBtn');
+        const editName = document.getElementById('editName');
+        const editGender = document.getElementById('editGender');
+        const editAge = document.getElementById('editAge');
+        const editJob = document.getElementById('editJob');
+        const editDesc = document.getElementById('editDesc');
+
+        // 绑定编辑按钮事件
+        function bindEditEvents() {
+            document.querySelectorAll('.editUserBtn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const userName = e.currentTarget.dataset.user;
+                    // 填充默认值
+                    editName.value = userName;
+                    editGender.value = userName.includes('姐') ? '女' : '男';
+                    editAge.value = userName === '小张' ? '28' : userName === '王师傅' ? '35' : '42';
+                    editJob.value = userName === '王师傅' ? '建筑工人' : userName === '李大姐' ? '家政服务' : '快递员';
+                    editDesc.value = userName === '王师傅' ? '从业10年，主要做水电安装，期望月薪8000-10000元，关注工作稳定性和社保缴纳。' : 
+                                     userName === '李大姐' ? '从事家政服务8年，擅长保洁和育儿，期望日薪200元以上，关注工作时长和休息时间。' :
+                                     '快递行业5年，熟悉同城配送，期望月薪6000-8000元，关注配送工具和补贴政策。';
+                    
+                    editModal.classList.remove('hidden');
+                });
+            });
+        }
+
+        // 关闭编辑弹窗
+        [closeEditBtn, cancelEditBtn].forEach(btn => {
+            btn.addEventListener('click', () => {
+                editModal.classList.add('hidden');
+            });
+        });
+
+        // 保存编辑
+        saveEditBtn.addEventListener('click', () => {
+            alert('用户信息编辑成功！');
+            editModal.classList.add('hidden');
+        });
+
+        // 初始化绑定事件
+        bindNav();
+        bindChatEvents();
+        bindEditEvents();
+        bindQuickBtns();
+        safeLoadHistory();
+        batchInterviewRefreshSubjects();
+
+        // 点击弹窗外部关闭（保留编辑弹窗逻辑；聊天已改为主内容区）
+        window.addEventListener('click', (e) => {
+            if (e.target === editModal) editModal.classList.add('hidden');
+        });
+
+        // 访谈记录：渲染与导出
+        const historyList = document.getElementById('historyList');
+        const recordTitle = document.getElementById('recordTitle');
+        const recordMeta = document.getElementById('recordMeta');
+        const recordViewer = document.getElementById('recordViewer');
+        const exportAllBtn = document.getElementById('exportAllBtn');
+        const exportSelectedBtn = document.getElementById('exportSelectedBtn');
+        const openInInterviewBtn = document.getElementById('openInInterviewBtn');
+        const clearHistoryBtn = document.getElementById('clearHistoryBtn');
+        const exportCurrentChatBtnEl = document.getElementById('exportCurrentChatBtn');
+
+        function formatLocalTime(iso) {
+            try { return new Date(iso).toLocaleString(); } catch (_) { return iso || ''; }
+        }
+
+        function summarizeRecord(rec) {
+            const lastUserMsg = [...(rec.messages || [])].reverse().find(m => m.role === 'user');
+            return lastUserMsg ? String(lastUserMsg.content || '').slice(0, 40) : '（暂无提问）';
+        }
+
+        function renderHistoryList() {
+            if (!historyList) return;
+            if (!interviewHistory.length) {
+                historyList.innerHTML = `<div class="p-4 text-sm text-gray-500">暂无访谈记录。</div>`;
+                return;
+            }
+            historyList.innerHTML = interviewHistory.map(rec => {
+                const isActive = rec.id === selectedRecordId;
+                return `
+                    <button class="w-full text-left p-4 hover:bg-secondary transition-colors ${isActive ? 'bg-secondary' : ''}" data-record-id="${rec.id}">
+                        <div class="flex items-start justify-between gap-2">
+                            <div class="min-w-0">
+                                <div class="font-semibold text-gray-800 truncate">${rec.userName}</div>
+                                <div class="text-xs text-gray-500 truncate">${summarizeRecord(rec)}</div>
+                            </div>
+                            <div class="text-[11px] text-gray-400 shrink-0">${formatLocalTime(rec.updatedAt)}</div>
+                        </div>
+                    </button>
+                `;
+            }).join('');
+
+            historyList.querySelectorAll('[data-record-id]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const id = btn.dataset.recordId;
+                    selectedRecordId = id;
+                    renderHistoryList();
+                    renderRecordViewer(id);
+                });
+            });
+        }
+
+        function renderRecordViewer(id) {
+            const rec = interviewHistory.find(r => r.id === id);
+            if (!rec) {
+                if (recordTitle) recordTitle.textContent = '选择一条访谈记录查看';
+                if (recordMeta) recordMeta.textContent = '';
+                if (recordViewer) recordViewer.innerHTML = `<div class="text-sm text-gray-500">暂无内容。</div>`;
+                if (exportSelectedBtn) exportSelectedBtn.disabled = true;
+                if (openInInterviewBtn) openInInterviewBtn.disabled = true;
+                return;
+            }
+            if (recordTitle) recordTitle.textContent = `与${rec.userName}的访谈`;
+            if (recordMeta) recordMeta.textContent = `创建于 ${formatLocalTime(rec.createdAt)} · 更新于 ${formatLocalTime(rec.updatedAt)} · 消息 ${rec.messages.length} 条`;
+            if (exportSelectedBtn) exportSelectedBtn.disabled = false;
+            if (openInInterviewBtn) openInInterviewBtn.disabled = false;
+            if (!recordViewer) return;
+            recordViewer.innerHTML = (rec.messages || []).map(m => {
+                const who = m.role === 'user' ? '我' : rec.userName;
+                const bubbleCls = m.role === 'user' ? 'bg-primary text-white ml-auto' : 'bg-gray-100 text-gray-800';
+                const align = m.role === 'user' ? 'items-end' : 'items-start';
+                return `
+                    <div class="flex flex-col ${align}">
+                        <span class="text-sm text-gray-500 mb-1">${who}</span>
+                        <div class="${bubbleCls} rounded-lg p-3 max-w-[80%] whitespace-pre-wrap">${m.content}</div>
+                        <span class="text-[11px] text-gray-400 mt-1">${formatLocalTime(m.at)}</span>
+                    </div>
+                `;
+            }).join('') || `<div class="text-sm text-gray-500">暂无内容。</div>`;
+        }
+
+        function downloadText(filename, text) {
+            const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 500);
+        }
+
+        function recordToMarkdown(rec) {
+            const lines = [];
+            lines.push(`# 访谈记录：${rec.userName}`);
+            lines.push(`- 创建时间：${formatLocalTime(rec.createdAt)}`);
+            lines.push(`- 更新时间：${formatLocalTime(rec.updatedAt)}`);
+            lines.push('');
+            for (const m of rec.messages || []) {
+                const who = m.role === 'user' ? '我' : rec.userName;
+                lines.push(`## ${who}（${formatLocalTime(m.at)}）`);
+                lines.push(String(m.content || '').trim());
+                lines.push('');
+            }
+            return lines.join('\n');
+        }
+
+        function exportRecord(rec) {
+            downloadText(`访谈记录_${rec.userName}.md`, recordToMarkdown(rec));
+        }
+
+        function exportAll() {
+            const payload = { exportedAt: nowIso(), count: interviewHistory.length, records: interviewHistory };
+            downloadText('访谈记录_全部.json', JSON.stringify(payload, null, 2));
+        }
+
+        if (exportAllBtn) exportAllBtn.addEventListener('click', exportAll);
+        if (exportSelectedBtn) exportSelectedBtn.addEventListener('click', () => {
+            const rec = interviewHistory.find(r => r.id === selectedRecordId);
+            if (rec) exportRecord(rec);
+        });
+        if (openInInterviewBtn) openInInterviewBtn.addEventListener('click', () => {
+            const rec = interviewHistory.find(r => r.id === selectedRecordId);
+            if (!rec) return;
+            chatTitle.textContent = `与${rec.userName}对话`;
+            if (interviewHint) interviewHint.textContent = `正在访谈：${rec.userName}（记录会自动保存，可在「访谈记录汇总」查看/导出）`;
+            if (exportCurrentChatBtn) exportCurrentChatBtn.disabled = false;
+            showView('interview');
+        });
+        if (clearHistoryBtn) clearHistoryBtn.addEventListener('click', () => {
+            if (!confirm('确定要清空全部访谈记录吗？此操作不可撤销。')) return;
+            interviewHistory = [];
+            selectedRecordId = null;
+            safeSaveHistory();
+            renderHistoryList();
+            renderRecordViewer(null);
+            alert('已清空全部访谈记录。');
+        });
+        if (exportCurrentChatBtnEl) exportCurrentChatBtnEl.addEventListener('click', () => {
+            const userName = getActiveUserNameFromTitle();
+            const rec = interviewHistory.find(r => r.userName === userName);
+            if (rec) exportRecord(rec);
+        });
+
+        // 初始视图：根据 hash 或默认首页
+        const initial = (location.hash || '#home').replace('#', '');
+        showView(['home', 'users', 'interview', 'batch', 'records'].includes(initial) ? initial : 'home');
+        renderHistoryList();
+        if (interviewHistory.length) {
+            selectedRecordId = interviewHistory[0].id;
+            renderRecordViewer(selectedRecordId);
+        }
+    </script>
+</body>
+</html>
